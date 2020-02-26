@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Serverless website template - storage components
+
+Parameters:
+  Service:
+    Type: String
+    Description: Name of the service, e.g. "my-blog"
+    AllowedPattern: ^[a-zA-Z0-9-]+$
+  Stage:
+    Type: String
+    Description: Name of the stage, e.g. "development", "production"
+    AllowedPattern: ^[a-zA-Z0-9-]+$
+
+Resources:
+  # Bucket where the website contents are stored
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Service}-content-${Stage}
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: TRUE
+        BlockPublicPolicy: TRUE
+        RestrictPublicBuckets: TRUE
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # Origin access identity used to communicate between S3 and CloudFront
+  OriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: Website access identity
+
+  # Policy allowing the CloudFront access identity to access the bucket
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Statement:
+          - Sid: CloudFrontPolicy
+            Effect: Allow
+            Action: s3:GetObject
+            Resource: !Join ['', ['arn:aws:s3:::', !Ref WebsiteBucket, '/*']]
+            Principal:
+              AWS: !Sub 'arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${OriginAccessIdentity}'
+
+Outputs:
+  BucketName:
+    Description: Name of the bucket where the website is deployed
+    Value: !Ref WebsiteBucket
+  BucketDomainName:
+    Description: Domain name of the bucket containing the website, for use as a CloudFront origin URL
+    Value: !GetAtt WebsiteBucket.RegionalDomainName
+  OriginAccessIdentity:
+    Description: Origin access identity granted read access to the website bucket
+    Value: !Ref OriginAccessIdentity

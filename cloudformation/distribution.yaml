@@ -1,0 +1,274 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Serverless website template - distribution components
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  Service:
+    Type: String
+    Description: Name of the service, e.g. "my-blog"
+    AllowedPattern: ^[a-zA-Z0-9-]+$
+  Stage:
+    Type: String
+    Description: Name of the stage, e.g. "development", "production"
+    AllowedPattern: ^[a-zA-Z0-9-]+$
+  DomainName:
+    Type: String
+    Description: Base domain name
+    # TODO Support international character sets
+    AllowedPattern: ^[a-z]+([a-z0-9-]*[a-z0-9]+)?(\.([a-z]+([a-z0-9-]*[a-z0-9]+)?)+)*$
+  Subdomain:
+    Type: String
+    Description: Name of the subdomain
+    Default: www
+    # TODO Support international character sets
+    AllowedPattern: ^[a-z]+([a-z0-9-]*[a-z0-9]+)?(\.([a-z]+([a-z0-9-]*[a-z0-9]+)?)+)*$
+  DomainRedirectMode:
+    Type: String
+    Description: Domain-level redirection mode - 'root_to_sub' (the default), 'sub_to_root' or 'none'; if 'none', no subdomain is created
+    Default: root_to_sub
+    AllowedValues:
+      - root_to_sub
+      - sub_to_root
+      - none
+  CertificateValidationMethod:
+    Type: String
+    Description: Method for validating an SSL certificate
+    Default: DNS
+    AllowedValues:
+      - DNS
+      - EMAIL
+  OriginBucketDomainName:
+    Type: String
+    Description: Domain name of the origin bucket
+    AllowedPattern: ^[a-z]+([a-z0-9-]*[a-z0-9]+)?(\.([a-z]+([a-z0-9-]*[a-z0-9]+)?)+)*$
+  OriginAccessIdentity:
+    Type: String
+    Description: Origin access identity granted access to the origin bucket
+    AllowedPattern: ^[A-Z0-9]+$
+  Route53HostedZoneId:
+    Type: String
+    Description: Hosted zone ID in Route53 for automatically adding ALIAS records
+    AllowedPattern: ^[A-Z0-9]*$
+    Default: ''
+  IndexDocument:
+    Type: String
+    Description: Name of the document to serve for a directory-level URL
+    Default: index.html
+
+Conditions:
+  # Apply the domain redirection one way or the other, unless the mode is "none"
+  ApplyDomainRedirect: !Not [!Equals [!Ref DomainRedirectMode, 'none']]
+
+  # Apply the index document logic unless disabled
+  ApplyIndexDocument: !Not [!Equals [!Ref IndexDocument, '']]
+
+  # If either the domain redirect or the index document logic is required, then an execution role is required
+  CreateLambdaEdgeRole: !Or
+    - !Not [!Equals [!Ref DomainRedirectMode, 'none']]
+    - !Not [!Equals [!Ref IndexDocument, '']]
+
+  # Always create the Route 53 record set for the root domain if a Zone ID is provided
+  CreateRootRecordSet: !Not [!Equals [!Ref Route53HostedZoneId, '']]
+
+  # Create the Route53 record set for the subdomain if a Zone ID is given and the domain redirection mode is not "none"
+  CreateSubdomainRecordSet: !And
+    - !Not [!Equals [!Ref Route53HostedZoneId, '']]
+    - !Not [!Equals [!Ref DomainRedirectMode, 'none']]
+
+Resources:
+  # The CloudFront CDN distribution for both the subdomain and the root domain
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        IPV6Enabled: true
+        DefaultRootObject: !Ref IndexDocument
+        DefaultCacheBehavior:
+          ViewerProtocolPolicy: redirect-to-https
+          ForwardedValues:
+            QueryString: true
+          TargetOriginId: !Sub ${Service}-origin-${Stage}
+          LambdaFunctionAssociations:
+            - !If
+              - ApplyDomainRedirect
+              - EventType: viewer-request
+                LambdaFunctionARN: !Ref ViewerRequestFunction.Version
+              - !Ref AWS::NoValue
+            - !If
+              - ApplyIndexDocument
+              - EventType: origin-request
+                LambdaFunctionARN: !Ref OriginRequestFunction.Version
+              - !Ref AWS::NoValue
+        Logging:
+          Bucket: !GetAtt LogsBucket.DomainName
+          Prefix: https/
+        Aliases:
+          - !Ref DomainName
+          - !If
+            - ApplyDomainRedirect
+            - !Sub ${Subdomain}.${DomainName}
+            - !Ref AWS::NoValue
+        ViewerCertificate:
+          AcmCertificateArn: !Ref Certificate
+          MinimumProtocolVersion: TLSv1.2_2018
+          SslSupportMethod: sni-only
+        Origins:
+          - Id: !Sub ${Service}-origin-${Stage}
+            DomainName: !Ref OriginBucketDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${OriginAccessIdentity}
+
+  # TLS/SSL certificate for the distribution
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      SubjectAlternativeNames:
+        - !If
+          - ApplyDomainRedirect
+          - !Sub ${Subdomain}.${DomainName}
+          - !Ref AWS::NoValue
+      ValidationMethod: !Ref CertificateValidationMethod
+
+  # DNS A entry for the root domain
+  RootDomainRecordSet:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateRootRecordSet
+    Properties:
+      Type: A
+      Name: !Ref DomainName
+      HostedZoneId: !Ref Route53HostedZoneId
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2 # This is an AWS-hardcoded value
+
+  # DNS AAAA entry for the root domain
+  RootDomainIpV6RecordSet:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateRootRecordSet
+    Properties:
+      Type: AAAA
+      Name: !Ref DomainName
+      HostedZoneId: !Ref Route53HostedZoneId
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2 # This is an AWS-hardcoded value
+
+  # DNS A entry for the subdomain
+  SubdomainRecordSet:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateSubdomainRecordSet
+    Properties:
+      Type: A
+      Name: !Sub ${Subdomain}.${DomainName}
+      HostedZoneId: !Ref Route53HostedZoneId
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2 # This is an AWS-hardcoded value
+
+  # DNS AAAA entry for the subdomain
+  SubdomainIpV6RecordSet:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateSubdomainRecordSet
+    Properties:
+      Type: AAAA
+      Name: !Sub ${Subdomain}.${DomainName}
+      HostedZoneId: !Ref Route53HostedZoneId
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2 # This is an AWS-hardcoded value
+
+  # Lambda@Edge function to serve an index document when the requested URL is a directory
+  OriginRequestFunction:
+    Type: AWS::Serverless::Function
+    Condition: ApplyIndexDocument
+    Properties:
+      Runtime: nodejs10.x # Maximum version supported by Lambda@Edge
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt LambdaEdgeRole.Arn
+      AutoPublishAlias: Current
+      InlineCode: !Sub |
+        const path = require('path');
+        module.exports.handler = async ({ Records }) => {
+          if (Records && Records.length && Records[0].cf && Records[0].cf.request) {
+            const request = Records[0].cf.request;
+            if (!path.extname(request.uri)) {
+              request.uri = request.uri.replace(/\/?$/, '\/${IndexDocument}');
+            }
+            return request;
+          }
+        };
+
+  # Lambda@Edge function to redirect between the root domain and the subdomain, depending on the redirect type
+  ViewerRequestFunction:
+    Type: AWS::Serverless::Function
+    Condition: ApplyDomainRedirect
+    Properties:
+      Runtime: nodejs10.x # Maximum version supported by Lambda@Edge
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt LambdaEdgeRole.Arn
+      AutoPublishAlias: Current
+      InlineCode: !Sub |
+        module.exports.handler = async ({ Records }) => {
+          if (Records && Records.length && Records[0].cf && Records[0].cf.request) {
+            const request = Records[0].cf.request;
+            const targetDomain = '${DomainRedirectMode}' === 'sub_to_root' ? '${DomainName}' : '${Subdomain}.${DomainName}';
+            if (request.headers.host && request.headers.host.length && request.headers.host[0].value !== targetDomain) {
+              return {
+                status: '301',
+                statusDescription: 'Moved Permanently',
+                headers: {
+                  location: [{
+                    key: 'Location',
+                    value: `https://${!targetDomain}${!request.uri}`
+                  }]
+                }
+              };
+            }
+            return request;
+          }
+        };
+
+  # Role for Lambda@Edge
+  LambdaEdgeRole:
+    Type: AWS::IAM::Role
+    Condition: CreateLambdaEdgeRole
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - edgelambda.amazonaws.com
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  # Bucket for logs
+  LogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Service}-logs-${Stage}
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: TRUE
+        BlockPublicPolicy: TRUE
+        RestrictPublicBuckets: TRUE
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+Outputs:
+  DistributionDomainName:
+    Description: Domain name of the CloudFront distribution, to associate with the domain name in DNS
+    Value: !GetAtt Distribution.DomainName
+  LogsBucketName:
+    Description: Name of the bucket to which log files are written
+    Value: !Ref LogsBucket

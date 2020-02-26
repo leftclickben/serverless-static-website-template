@@ -1,0 +1,22 @@
+{
+  "name": "serverless-website-template",
+  "version": "1.0.0",
+  "description": "Serverless website template, for use as boilerplate to deploy to AWS S3, CloudFront, Lambda and CloudFormation",
+  "author": "Ben New <ben@leftclick.com.au>",
+  "license": "MIT",
+  "main": "README.md",
+  "private": true,
+  "config": {
+    "service": "example-website",
+    "content_region": "ap-southeast-2",
+    "default_stage": "development"
+  },
+  "scripts": {
+    "deploy:cloudformation:storage": "aws cloudformation deploy --region ${npm_package_config_content_region} --template-file cloudformation/storage.yaml --stack-name ${npm_package_config_service}-storage-${npm_config_stage:-${npm_package_config_default_stage}} --parameter-overrides Service=${npm_package_config_service} Stage=${npm_config_stage:-${npm_package_config_default_stage}} --no-fail-on-empty-changeset",
+    "deploy:cloudformation:distribution": "aws cloudformation deploy --region us-east-1 --template-file cloudformation/distribution.yaml --stack-name ${npm_package_config_service}-distribution-${npm_config_stage:-${npm_package_config_default_stage}} --capabilities CAPABILITY_IAM --parameter-overrides Service=${npm_package_config_service} Stage=${npm_config_stage:-${npm_package_config_default_stage}} DomainName=${npm_config_domain} $([ \"${npm_config_subdomain}\" != '' ] && echo \"Subdomain=${npm_config_subdomain}\" || echo '') $([ \"${npm_config_redirect}\" != '' ] && echo \"DomainRedirectMode=${npm_config_redirect}\" || echo '') $([ \"${npm_config_validation}\" != '' ] && echo \"CertificateValidationMethod=${npm_config_validation}\" || echo '') $([ \"${npm_config_index}\" != '' ] && echo \"IndexDocument=${npm_config_index}\" : echo '') Route53HostedZoneId=${npm_config_zoneid} OriginAccessIdentity=$(npm run --silent get-output --stack=${npm_package_config_service}-storage-${npm_config_stage:-${npm_package_config_default_stage}} --output=OriginAccessIdentity) OriginBucketDomainName=$(npm run --silent get-output --stack=${npm_package_config_service}-storage-${npm_config_stage:-${npm_package_config_default_stage}} --output=BucketDomainName) --no-fail-on-empty-changeset",
+    "deploy:cloudformation": "npm run deploy:cloudformation:storage && npm run deploy:cloudformation:distribution",
+    "deploy:content": "aws s3 sync public s3://$(npm run --silent get-output --stack=${npm_package_config_service}-storage-${npm_config_stage:-${npm_package_config_default_stage}} --output=BucketName)",
+    "deploy": "npm run deploy:cloudformation && npm run deploy:content",
+    "get-output": "aws cloudformation describe-stacks --region ${npm_package_config_content_region} --output text --stack-name \"${npm_config_stack}\" --query \"Stacks[0].Outputs[?OutputKey=='${npm_config_output}'].OutputValue\""
+  }
+}

@@ -1,0 +1,43 @@
+* {
+  color: #fff;
+  font-family: FreeSans, Helvetica, sans-serif;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background: linear-gradient(0deg, #333, #111, #000, #000, #000, #000, #111, #333);
+}
+
+a {
+  color: #ef9c31;
+  text-decoration: none
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+p {
+  line-height: 2;
+}
+
+code {
+  background-color: #666;
+  border-radius: 4px;
+  padding: 4px;
+}
+
+img {
+  max-width: 100%;
+}
+
+.container {
+  width: 800px;
+  max-width: 100%;
+  margin: 0 auto;
+}
