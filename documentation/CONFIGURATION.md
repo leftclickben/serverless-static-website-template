@@ -4,7 +4,7 @@ There are several configuration parameters that affect the way the static websit
 
 ## Parameters
 
-The following configuration parameters are understood:
+The deployment scripts support the following configuration parameters:
 
  | `npm` command parameter | `aws cloudformation` parameter | Default value | Description |
  |-----|-----|-----|-----|
