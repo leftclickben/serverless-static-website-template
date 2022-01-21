@@ -1,6 +1,6 @@
 {
   "name": "serverless-website-template",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Serverless website template, for use as boilerplate to deploy to AWS S3, CloudFront, Lambda and CloudFormation",
   "author": "Ben New <ben@leftclick.com.au>",
   "license": "MIT",

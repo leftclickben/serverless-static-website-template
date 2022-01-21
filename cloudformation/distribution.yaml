@@ -184,7 +184,7 @@ Resources:
     Type: AWS::Serverless::Function
     Condition: ApplyIndexDocument
     Properties:
-      Runtime: nodejs10.x # Maximum version supported by Lambda@Edge
+      Runtime: nodejs14.x # Maximum version supported by Lambda@Edge
       Handler: index.handler
       MemorySize: 128
       Role: !GetAtt LambdaEdgeRole.Arn
@@ -206,7 +206,7 @@ Resources:
     Type: AWS::Serverless::Function
     Condition: ApplyDomainRedirect
     Properties:
-      Runtime: nodejs10.x # Maximum version supported by Lambda@Edge
+      Runtime: nodejs14.x # Maximum version supported by Lambda@Edge
       Handler: index.handler
       MemorySize: 128
       Role: !GetAtt LambdaEdgeRole.Arn
